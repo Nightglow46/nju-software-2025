@@ -1,0 +1,313 @@
+try:
+    # package-relative imports
+    from .db import Database
+    from .services import RecordService, CategoryService, BudgetService, NotificationService, StatisticsService
+    from .models import Record, RecordType, Category, Budget, Notification
+    from .utils import parse_date
+except Exception:
+    # fallback when running script directly from code/ folder
+    from db import Database
+    from services import RecordService, CategoryService, BudgetService, NotificationService, StatisticsService
+    from models import Record, RecordType, Category, Budget, Notification
+    from utils import parse_date
+
+from datetime import date
+import uuid
+
+
+def _ask_amount(prompt: str) -> float:
+    while True:
+        s = input(prompt).strip()
+        try:
+            return float(s)
+        except Exception:
+            print('invalid amount, please input a number')
+
+
+def _ask_type(prompt: str) -> RecordType:
+    while True:
+        s = input(prompt).strip().lower()
+        if not s:
+            print("type is required (income/expense)")
+            continue
+        if s.startswith('i'):
+            return RecordType.INCOME
+        if s.startswith('e'):
+            return RecordType.EXPENSE
+        print("invalid type, please enter 'income' or 'expense'")
+
+
+def _ask_date(prompt: str) -> date:
+    while True:
+        s = input(prompt).strip()
+        if not s:
+            return date.today()
+        try:
+            return parse_date(s)
+        except Exception:
+            print("invalid date format, expected YYYY-MM-DD (or leave empty for today)")
+
+
+def run_cli(db_path: str = None):
+    db = Database(db_path)
+    rs = RecordService(db)
+    cs = CategoryService(db)
+    bs = BudgetService(db)
+    ns = NotificationService(db)
+    stats = StatisticsService(db)
+    # account service for Scheme B
+    try:
+        from services import AccountService
+    except Exception:
+        from .services import AccountService
+    asvc = AccountService(db)
+
+    print("Simple Accounting CLI. Type 'help' for commands.")
+    while True:
+        try:
+            cmd = input('> ').strip()
+        except (EOFError, KeyboardInterrupt):
+            print('\nexit')
+            break
+        if not cmd:
+            continue
+        if cmd in ('q', 'quit', 'exit'):
+            break
+        if cmd == 'help':
+            print("commands: add, list, stats, addcat, listcat, addacct, listacct, showrecords, help, exit")
+            continue
+        if cmd == 'addacct':
+            # create a new account
+            name = input('account name: ').strip()
+            from uuid import uuid4
+            from models import Account
+            acc = Account(account_id=str(uuid4()), name=name)
+            asvc.add_account(acc)
+            print('account added', acc.account_id)
+            continue
+        if cmd == 'listacct':
+            for a in asvc.list_accounts():
+                print(a.account_id, a.name, a.balance, a.currency)
+            continue
+        if cmd == 'add':
+            amount = _ask_amount('amount: ')
+            rtype = _ask_type('type (income/expense): ')
+            d = _ask_date('date (YYYY-MM-DD, optional): ')
+            # Account selection (required for scheme B): ensure at least one account exists
+            accs = asvc.list_accounts()
+            if not accs:
+                print('No accounts found. Creating a default account named "默认账户".')
+                from uuid import uuid4
+                from models import Account
+                default_acc = Account(account_id=str(uuid4()), name='默认账户')
+                asvc.add_account(default_acc)
+                accs = asvc.list_accounts()
+            # Prompt user to choose account by index (required)
+            while True:
+                print('Choose an account by index:')
+                for i, a in enumerate(accs, start=1):
+                    print(f"{i}) {a.name}")
+                sel = input('account index: ').strip()
+                try:
+                    idx = int(sel)
+                    if 1 <= idx <= len(accs):
+                        account_id = accs[idx-1].account_id
+                        break
+                    else:
+                        print('invalid index, try again')
+                except Exception:
+                    print('invalid input, enter a number')
+
+            # Show categories with indices for easier selection (optional)
+            available_cats = cs.list_categories()
+            cat = None
+            # Category selection is optional; if user skips, default to '其他'
+            if available_cats:
+                print('Choose a category by index (optional, press Enter to skip):')
+                for i, c in enumerate(available_cats, start=1):
+                    print(f"{i}) {c.name}")
+                sel = input('category index (optional): ').strip()
+                if sel:
+                    try:
+                        idx = int(sel)
+                        if 1 <= idx <= len(available_cats):
+                            cat = available_cats[idx-1].category_id
+                        else:
+                            print('invalid index, leaving as 其他')
+                    except Exception:
+                        print('invalid input, leaving as 其他')
+            else:
+                # no categories defined; create '其他' automatically
+                from uuid import uuid4
+                from models import Category
+                other = Category(category_id=str(uuid4()), name='其他')
+                cs.add_category(other)
+                cat = other.category_id
+            note = input('note (optional): ').strip() or None
+            r = Record.create(amount=amount, rtype=rtype, date_obj=d, category_id=cat, note=note, account_id=account_id)
+            rs.add_record(r)
+            print('added', r.record_id)
+            continue
+        if cmd == 'list':
+            rows = rs.list_records(50, 0)
+            # build category id -> name map and account id -> name map
+            cat_map = {c.category_id: c.name for c in cs.list_categories()}
+            acc_map = {a.account_id: a.name for a in asvc.list_accounts()}
+            for r in rows:
+                cname = cat_map.get(r.category_id, '其他') if r.category_id else '其他'
+                aname = acc_map.get(r.account_id, '无账户') if getattr(r, 'account_id', None) else '无账户'
+                print(r.record_id, r.date.isoformat(), r.type.value, r.amount, cname, aname, r.note)
+            continue
+        if cmd == 'stats':
+            # Simplified stats: choose account and show account_summary (all time)
+            accs = asvc.list_accounts()
+            if not accs:
+                print('No accounts found. Please create an account first (addacct).')
+                continue
+            print('Choose account to view summary:')
+            for i, a in enumerate(accs, start=1):
+                print(f"{i}) {a.name}")
+            sel = input('account index: ').strip()
+            try:
+                idx = int(sel)
+                if 1 <= idx <= len(accs):
+                    account_choice = accs[idx-1].account_id
+                    account_name = accs[idx-1].name
+                else:
+                    print('invalid account selection')
+                    continue
+            except Exception:
+                print('invalid input')
+                continue
+
+            s = stats.account_summary(account_choice)
+            print(f"Account summary for {account_name}:")
+            print(s)
+            continue
+
+        if cmd == 'showrecords':
+            # New filter: choose account (required), choose category (optional), choose date range (optional), then list matching records
+            accs = asvc.list_accounts()
+            if not accs:
+                print('No accounts found. Please create an account first (addacct).')
+                continue
+
+            # Loop until user provides a valid account selection or cancels (empty input)
+            account_choice = None
+            while True:
+                print('Choose account to filter by (enter index or account name, press Enter to cancel):')
+                for i, a in enumerate(accs, start=1):
+                    print(f"{i}) {a.name}")
+                sel = input('account index or name: ').strip()
+                if not sel:
+                    print('Cancelled account selection.')
+                    break
+                # try index first
+                if sel.isdigit():
+                    idx = int(sel)
+                    if 1 <= idx <= len(accs):
+                        account_choice = accs[idx-1].account_id
+                        break
+                    else:
+                        print('invalid index, try again')
+                        continue
+                # try match by name (case-insensitive)
+                matches = [a for a in accs if a.name.lower() == sel.lower()]
+                if matches:
+                    account_choice = matches[0].account_id
+                    break
+                # partial name match
+                partial = [a for a in accs if sel.lower() in a.name.lower()]
+                if len(partial) == 1:
+                    account_choice = partial[0].account_id
+                    break
+                elif len(partial) > 1:
+                    print('multiple accounts match that name, please be more specific or use index:')
+                    for a in partial:
+                        print('-', a.name)
+                    continue
+                else:
+                    print('invalid input, no matching account found; try again or press Enter to cancel')
+                    continue
+
+            # if user cancelled, go back to main prompt
+            if not account_choice:
+                continue
+
+            # category optional
+            cats = cs.list_categories()
+            category_choice = None
+            if cats:
+                print('Choose category to filter by (optional):')
+                for i, c in enumerate(cats, start=1):
+                    print(f"{i}) {c.name}")
+                sel_cat = input('category index (optional): ').strip()
+                if sel_cat:
+                    try:
+                        idxc = int(sel_cat)
+                        if 1 <= idxc <= len(cats):
+                            category_choice = cats[idxc-1].category_id
+                        else:
+                            print('invalid category selection, ignoring')
+                    except Exception:
+                        print('invalid category selection, ignoring')
+
+            # date range optional
+            s_input = input('start date (YYYY-MM-DD, optional): ').strip()
+            e_input = input('end date (YYYY-MM-DD, optional): ').strip()
+            if s_input:
+                start = parse_date(s_input)
+            else:
+                start = None
+            if e_input:
+                end = parse_date(e_input)
+            else:
+                end = None
+
+            # Build SQL
+            sql = "SELECT * FROM records WHERE account_id = ?"
+            params = [account_choice]
+            if category_choice:
+                sql += " AND category_id = ?"
+                params.append(category_choice)
+            if start and end:
+                sql += " AND date BETWEEN ? AND ?"
+                params.extend([start.isoformat(), end.isoformat()])
+            elif start and not end:
+                sql += " AND date >= ?"
+                params.append(start.isoformat())
+            elif end and not start:
+                sql += " AND date <= ?"
+                params.append(end.isoformat())
+            sql += " ORDER BY date DESC"
+
+            rows = db.query(sql, tuple(params))
+            # prepare maps
+            cat_map = {c.category_id: c.name for c in cats}
+            acc_map = {a.account_id: a.name for a in accs}
+            if not rows:
+                print('No records found for the given filters.')
+            else:
+                for r in rows:
+                    cname = cat_map.get(r['category_id'], '其他') if r['category_id'] else '其他'
+                    aname = acc_map.get(r['account_id'], '未知账户')
+                    print(r['record_id'], r['date'], r['type'], r['amount'], cname, aname, r['note'])
+            continue
+        if cmd == 'addcat':
+            name = input('name: ')
+            cat = Category(category_id=str(uuid.uuid4()), name=name)
+            cs.add_category(cat)
+            print('category added', cat.category_id)
+            continue
+        if cmd == 'listcat':
+            # 显示友好的分类列表：每行只显示分类名字，便于用户阅读
+            for c in cs.list_categories():
+                print(c.name)
+            continue
+        print('unknown command')
+
+    db.close()
+
+
+if __name__ == '__main__':
+    run_cli()

@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# virtualenv
+venv/
+.env/
+.env.*
+
+# IDE/editor
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# SQLite / local DB
+*.db
+*.sqlite
+accounting.db
+*.sqlite3
+
+# Test / cache
+.pytest_cache/
+.coverage
+
+# Generated artifacts
+*.png
+*.pdf
+*.zip
+
+# node modules, if any
+node_modules/
+
+# Ignore experiment reports (do not include requirements or reports in remote submission)
+软工2025实验三.md
+实验二.txt

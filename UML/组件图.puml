@@ -1,0 +1,25 @@
+@startuml Local_ComponentDiagram_AccountingApp
+
+package "Local Application" {
+  [UI Module]
+  [Record Module]
+  [Category & Tag Module]
+  [Budget & Notification Module]
+  [Statistics Module]
+  [Search Module]
+  [Local Database]
+  [Settings Module]
+}
+
+[UI Module] --> [Record Module] : input / edit
+[UI Module] --> [Statistics Module] : view reports
+[UI Module] --> [Search Module] : filter / search
+[Record Module] --> [Local Database] : store/retrieve
+[Category & Tag Module] --> [Local Database] : manage categories
+[Budget & Notification Module] --> [Local Database] : read budgets
+[Budget & Notification Module] --> [UI Module] : alert user
+[Statistics Module] --> [Local Database] : read data
+[Search Module] --> [Local Database] : query records
+[Settings Module] --> [Local Database] : save preferences
+
+@enduml

@@ -1,0 +1,29 @@
+@startuml Local_UseCase_AccountingApp
+
+actor User
+
+User -- (Add Record)
+User -- (Edit Record)
+User -- (Delete Record)
+User -- (View Statistics)
+User -- (Set Budget)
+User -- (Receive Notification)
+User -- (Search Records)
+User -- (Export Data)
+User -- (Manage Categories)
+User -- (Backup / Restore Local Data)
+
+package "UseCases" {
+  (Add Record)
+  (Edit Record)
+  (Delete Record)
+  (View Statistics)
+  (Search Records)
+  (Set Budget)
+  (Receive Notification)
+  (Export Data)
+  (Manage Categories)
+  (Backup / Restore Local Data)
+}
+
+@enduml

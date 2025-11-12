@@ -1,0 +1,24 @@
+@startuml Local_Sequence_AddRecord
+
+actor User
+participant "UI" as UI
+participant "RecordModule" as RM
+participant "BudgetModule" as BM
+participant "NotificationSystem" as NS
+participant "LocalDatabase" as DB
+participant "StatisticsModule" as ST
+
+User -> UI : 输入记录信息
+UI -> RM : validateAndSave(data)
+RM -> DB : insert(record)
+RM -> BM : checkBudget(record)
+BM -> BM : compareWithLimit()
+alt 超出预算
+  BM -> NS : createNotification(msg)
+  NS -> UI : showNotification(msg)
+end
+RM -> ST : updateStatistics(record)
+ST -> UI : refreshCharts()
+UI -> User : 显示保存成功
+
+@enduml

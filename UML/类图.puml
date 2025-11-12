@@ -1,0 +1,79 @@
+@startuml Local_ClassDiagram_AccountingApp
+
+class User {
+  +userId: String
+  +name: String
+  +settings: Settings
+  +getRecords(): List<Record>
+  +getBudgets(): List<Budget>
+}
+
+class Record {
+  +recordId: String
+  +amount: Double
+  +type: RecordType
+  +date: Date
+  +categoryId: String
+  +tags: List<String>
+  +note: String
+  +attachments: List<File>
+  +create(): Record
+  +update(): boolean
+  +delete(): boolean
+}
+
+enum RecordType {
+  INCOME
+  EXPENSE
+}
+
+class Category {
+  +categoryId: String
+  +name: String
+  +icon: String
+  +color: String
+}
+
+class Budget {
+  +budgetId: String
+  +categoryId: String
+  +limit: Double
+  +period: Period
+  +checkThreshold(currentSpend: Double): Notification?
+}
+
+class Notification {
+  +notifId: String
+  +type: String
+  +message: String
+  +send(): boolean
+}
+
+class StatisticsService {
+  +generateSummary(period: DateRange): Summary
+  +generateTrend(period: DateRange): TrendData
+}
+
+class SearchService {
+  +search(query: String, filters: Map): List<Record>
+  +filterByDate(range: DateRange): List<Record>
+  +sort(records: List<Record>, key: String, asc: boolean): List<Record>
+}
+
+class Settings {
+  +theme: String
+  +darkMode: boolean
+  +currency: String
+  +biometricsEnabled: boolean
+  +save(): boolean
+}
+
+User "1" o-- "0..*" Record : owns
+Record "*" --> "1" Category : belongsTo
+User "1" o-- "0..*" Budget : sets
+Budget --> Notification : mayTrigger
+StatisticsService ..> Record : reads
+SearchService ..> Record : reads
+User "1" o-- "1" Settings : has
+
+@enduml
