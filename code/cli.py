@@ -74,7 +74,7 @@ def run_cli(db_path: str = None):
         if cmd in ('q', 'quit', 'exit'):
             break
         if cmd == 'help':
-            print("commands: add, list, stats, addcat, listcat, addacct, listacct, showrecords, help, exit")
+            print("commands: add, list, stats, addcat, listcat, addacct, listacct, delrec, delacct, delcat, reset, showrecords, help, exit")
             continue
         if cmd == 'addacct':
             # create a new account
@@ -83,11 +83,13 @@ def run_cli(db_path: str = None):
             from models import Account
             acc = Account(account_id=str(uuid4()), name=name)
             asvc.add_account(acc)
-            print('account added', acc.account_id)
+            # For user friendliness, do not show full UUIDs; show name and short id
+            print('account added:', acc.name, f"(id={acc.account_id[:8]}...)")
             continue
         if cmd == 'listacct':
-            for a in asvc.list_accounts():
-                print(a.account_id, a.name, a.balance, a.currency)
+            # Display friendly list without exposing full UUIDs
+            for i, a in enumerate(asvc.list_accounts(), start=1):
+                print(f"{i}) {a.name}  balance={a.balance} {a.currency}  (id={a.account_id[:8]}...)")
             continue
         if cmd == 'add':
             amount = _ask_amount('amount: ')
@@ -146,17 +148,20 @@ def run_cli(db_path: str = None):
             note = input('note (optional): ').strip() or None
             r = Record.create(amount=amount, rtype=rtype, date_obj=d, category_id=cat, note=note, account_id=account_id)
             rs.add_record(r)
-            print('added', r.record_id)
+            # Do not print full UUID to user; show short id
+            print('added:', f"{r.amount} {r.type.value} on {r.date.isoformat()} (id={r.record_id[:8]}...)")
             continue
         if cmd == 'list':
             rows = rs.list_records(50, 0)
             # build category id -> name map and account id -> name map
             cat_map = {c.category_id: c.name for c in cs.list_categories()}
             acc_map = {a.account_id: a.name for a in asvc.list_accounts()}
-            for r in rows:
+            for idx, r in enumerate(rows, start=1):
                 cname = cat_map.get(r.category_id, '其他') if r.category_id else '其他'
                 aname = acc_map.get(r.account_id, '无账户') if getattr(r, 'account_id', None) else '无账户'
-                print(r.record_id, r.date.isoformat(), r.type.value, r.amount, cname, aname, r.note)
+                # Hide full UUIDs from display; show short id prefix if needed
+                short_id = (r.record_id[:8] + '...') if getattr(r, 'record_id', None) else ''
+                print(f"{idx}) {r.date.isoformat()} {r.type.value} {r.amount} {cname} {aname} {r.note} {short_id}")
             continue
         if cmd == 'stats':
             # Simplified stats: choose account and show account_summary (all time)
@@ -288,21 +293,156 @@ def run_cli(db_path: str = None):
             if not rows:
                 print('No records found for the given filters.')
             else:
-                for r in rows:
+                for idx, r in enumerate(rows, start=1):
                     cname = cat_map.get(r['category_id'], '其他') if r['category_id'] else '其他'
                     aname = acc_map.get(r['account_id'], '未知账户')
-                    print(r['record_id'], r['date'], r['type'], r['amount'], cname, aname, r['note'])
+                    rec_id = r['record_id'] if 'record_id' in r.keys() else None
+                    short_id = (rec_id[:8] + '...') if rec_id else ''
+                    print(f"{idx}) {r['date']} {r['type']} {r['amount']} {cname} {aname} {r['note']} {short_id}")
             continue
         if cmd == 'addcat':
             name = input('name: ')
             cat = Category(category_id=str(uuid.uuid4()), name=name)
             cs.add_category(cat)
-            print('category added', cat.category_id)
+            print('category added:', cat.name, f"(id={cat.category_id[:8]}...)")
             continue
         if cmd == 'listcat':
             # 显示友好的分类列表：每行只显示分类名字，便于用户阅读
             for c in cs.list_categories():
                 print(c.name)
+            continue
+        if cmd in ('delrec', 'deleterec'):
+            # Show recent records for selection
+            recent = rs.list_records(10, 0)
+            if not recent:
+                print('No records available to delete.')
+                continue
+            print('Recent records:')
+            for i, r in enumerate(recent, start=1):
+                # build category and account maps for display
+                catmap = {c.category_id: c.name for c in cs.list_categories()}
+                accmap = {a.account_id: a.name for a in asvc.list_accounts()}
+                cname = catmap.get(r.category_id, '其他') if r.category_id else '其他'
+                aname = accmap.get(r.account_id, '无账户') if getattr(r, 'account_id', None) else '无账户'
+                short_id = (r.record_id[:8] + '...') if getattr(r, 'record_id', None) else ''
+                print(f"{i}) {r.date.isoformat()} {r.type.value} {r.amount} {cname} {aname} {r.note} {short_id}")
+
+            sel = input('Choose record index to delete or paste full record_id (Enter to cancel): ').strip()
+            if not sel:
+                print('cancelled')
+                continue
+            # determine record_id
+            record_id = None
+            if sel.isdigit():
+                idx = int(sel)
+                if 1 <= idx <= len(recent):
+                    record_id = recent[idx-1].record_id
+                else:
+                    print('invalid index')
+                    continue
+            else:
+                record_id = sel
+
+            confirm = input(f"Type YES to permanently delete selected record (id starts with {record_id[:8]}): ").strip()
+            if confirm != 'YES':
+                print('aborted')
+                continue
+            ok = rs.delete_record(record_id)
+            print('deleted' if ok else 'record not found')
+            continue
+        if cmd == 'delacct':
+            accs = asvc.list_accounts()
+            if not accs:
+                print('No accounts found.')
+                continue
+            print('Choose account to delete:')
+            for i, a in enumerate(accs, start=1):
+                print(f"{i}) {a.name}")
+            sel = input('account index: ').strip()
+            try:
+                idx = int(sel)
+                if not (1 <= idx <= len(accs)):
+                    print('invalid index')
+                    continue
+            except Exception:
+                print('invalid input')
+                continue
+            acc = accs[idx-1]
+            # check for dependent records
+            cnt = db.query('SELECT COUNT(1) as c FROM records WHERE account_id=?', (acc.account_id,))[0][0]
+            if cnt and cnt > 0:
+                print(f'Account has {cnt} records. Use force to delete account and its records.')
+                force = input('Type YES to force delete (will remove related records): ').strip() == 'YES'
+            else:
+                force = False
+            confirm = input(f"Type YES to delete account '{acc.name}': ").strip()
+            if confirm != 'YES':
+                print('aborted')
+                continue
+            ok = asvc.delete_account(acc.account_id, force=force)
+            print('deleted' if ok else 'cannot delete account (has dependent records)')
+            continue
+        if cmd == 'delcat':
+            cats = cs.list_categories()
+            if not cats:
+                print('No categories found.')
+                continue
+            print('Choose category to delete:')
+            for i, c in enumerate(cats, start=1):
+                print(f"{i}) {c.name}")
+            sel = input('category index: ').strip()
+            try:
+                idx = int(sel)
+                if not (1 <= idx <= len(cats)):
+                    print('invalid index')
+                    continue
+            except Exception:
+                print('invalid input')
+                continue
+            cat = cats[idx-1]
+            # protect built-in category '其他' from deletion
+            if getattr(cat, 'name', '') == '其他':
+                print("Cannot delete built-in category '其他'.")
+                continue
+            cnt = db.query('SELECT COUNT(1) as c FROM records WHERE category_id=?', (cat.category_id,))[0][0]
+            if cnt and cnt > 0:
+                print(f'Category has {cnt} records. Force will detach records (set to uncategorized) and delete category.')
+                force = input('Type YES to force (detach records and delete): ').strip() == 'YES'
+            else:
+                force = False
+            confirm = input(f"Type YES to delete category '{cat.name}': ").strip()
+            if confirm != 'YES':
+                print('aborted')
+                continue
+            ok = cs.delete_category(cat.category_id, force=force)
+            print('deleted' if ok else 'cannot delete category (has dependent records)')
+            continue
+        if cmd == 'reset':
+            print('WARNING: this will delete ALL user data (records, accounts, categories, budgets, notifications)')
+            confirm = input("Type YES to proceed and create a backup: ").strip()
+            if confirm != 'YES':
+                print('aborted')
+                continue
+            # create backup first
+            import time
+            backup_path = str(db.path) + '.backup.' + time.strftime('%Y%m%d%H%M%S')
+            try:
+                db.backup(backup_path)
+                print('backup saved to', backup_path)
+            except Exception as e:
+                print('backup failed:', e)
+                # still proceed only if user re-confirms
+                more = input('Backup failed. Type YES to continue without backup: ').strip()
+                if more != 'YES':
+                    print('aborted')
+                    continue
+            # delete all rows
+            db.execute('DELETE FROM records')
+            db.execute('DELETE FROM accounts')
+            db.execute('DELETE FROM categories')
+            db.execute('DELETE FROM budgets')
+            db.execute('DELETE FROM notifications')
+            print('database reset complete')
             continue
         print('unknown command')
 

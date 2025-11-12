@@ -54,7 +54,7 @@ class RecordService:
             return None
         r = rows[0]
         # if stored date is empty/NULL, treat it as today
-        dstr = r.get("date") or date.today().isoformat()
+        dstr = (r["date"] if ("date" in r.keys() and r["date"]) else date.today().isoformat())
         return Record(
             record_id=r["record_id"],
             amount=r["amount"],
@@ -71,17 +71,18 @@ class RecordService:
         rows = self.db.query("SELECT * FROM records ORDER BY date DESC LIMIT ? OFFSET ?", (limit, offset))
         out: List[Record] = []
         for r in rows:
-            dstr = r.get("date") or date.today().isoformat()
+            dstr = (r["date"] if ("date" in r.keys() and r["date"]) else date.today().isoformat())
+            account_id = (r["account_id"] if ("account_id" in r.keys() and r["account_id"]) else None)
             out.append(Record(
                 record_id=r["record_id"],
                 amount=r["amount"],
                 type=RecordType(r["type"]),
                 date=date.fromisoformat(dstr),
-                category_id=r["category_id"],
+                category_id=(r["category_id"] if ("category_id" in r.keys() and r["category_id"]) else None),
                 tags=json.loads(r["tags"] or "[]"),
                 note=r["note"],
                 attachments=json.loads(r["attachments"] or "[]"),
-                account_id=r.get("account_id"),
+                account_id=account_id,
             ))
         return out
 
@@ -98,6 +99,18 @@ class CategoryService:
         rows = self.db.query("SELECT * FROM categories ORDER BY name")
         return [Category(category_id=r["category_id"], name=r["name"], icon=r["icon"], color=r["color"]) for r in rows]
 
+    def delete_category(self, category_id: str, force: bool = False) -> bool:
+        """Delete a category. If there are records referencing it and force=False, refuse and return False.
+        If force=True, detach records (set category_id=NULL) then delete the category.
+        """
+        rows = self.db.query("SELECT 1 FROM records WHERE category_id=? LIMIT 1", (category_id,))
+        if rows and not force:
+            return False
+        if force:
+            self.db.execute("UPDATE records SET category_id = NULL WHERE category_id = ?", (category_id,))
+        cur = self.db.execute("DELETE FROM categories WHERE category_id=?", (category_id,))
+        return cur.rowcount > 0
+
 
 class AccountService:
     def __init__(self, db: Database):
@@ -113,6 +126,18 @@ class AccountService:
         for r in rows:
             out.append(Account(account_id=r['account_id'], name=r['name'], type=r['type'], balance=r['balance'], currency=r['currency']))
         return out
+
+    def delete_account(self, account_id: str, force: bool = False) -> bool:
+        """Delete an account. If records reference it and force=False, refuse and return False.
+        If force=True, delete related records then delete the account.
+        """
+        rows = self.db.query("SELECT 1 FROM records WHERE account_id=? LIMIT 1", (account_id,))
+        if rows and not force:
+            return False
+        if force:
+            self.db.execute("DELETE FROM records WHERE account_id=?", (account_id,))
+        cur = self.db.execute("DELETE FROM accounts WHERE account_id=?", (account_id,))
+        return cur.rowcount > 0
 
 
 
